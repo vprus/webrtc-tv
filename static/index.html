@@ -1,0 +1,1530 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WebRTC TV</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, system-ui, sans-serif;
+        --cabinet-bezel-gap: 1.4rem;
+        --control-strip-height: 34px;
+        --perforation-size: 12px;
+        --perforation-offset-y: 5px;
+        --controls-top-padding: 0.65rem;
+        --controls-bottom-padding: 0.1rem;
+        --tv-width: 780px;
+        --debug-width: 380px;
+        --debug-gap: 1.75rem;
+        --debug-panel-space: 0px;
+      }
+
+      html {
+        scrollbar-gutter: stable both-edges;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding-top: 2rem;
+        padding-right: max(2rem, env(safe-area-inset-right));
+        padding-bottom: calc(max(2rem, env(safe-area-inset-bottom)) + var(--debug-panel-space));
+        padding-left: max(2rem, env(safe-area-inset-left));
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.8), transparent 38%),
+          linear-gradient(180deg, #ffffff, #f0ece5 100%);
+        color: #241f19;
+      }
+
+      .scene {
+        position: relative;
+        width: 100%;
+        display: grid;
+        place-items: center;
+        min-height: calc(100vh - 4rem);
+      }
+
+      .stage {
+        position: relative;
+        width: min(100%, var(--tv-width));
+        display: grid;
+        justify-items: center;
+      }
+
+      button,
+      pre,
+      p {
+        font: inherit;
+      }
+
+      .tv {
+        position: relative;
+        width: min(100%, var(--tv-width));
+        margin: 0;
+        align-self: center;
+        padding: var(--cabinet-bezel-gap) 1.45rem 0.9rem;
+        border-radius: 32px 32px 26px 26px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02) 14%, rgba(0, 0, 0, 0.16) 100%),
+          radial-gradient(130% 84% at 14% 22%, rgba(155, 100, 60, 0.16) 0, rgba(155, 100, 60, 0.14) 10%, transparent 32%),
+          radial-gradient(120% 78% at 82% 64%, rgba(72, 40, 20, 0.18) 0, rgba(72, 40, 20, 0.14) 9%, transparent 28%),
+          repeating-linear-gradient(
+            101deg,
+            rgba(77, 47, 25, 0.2) 0 3px,
+            rgba(137, 92, 55, 0.06) 3px 8px,
+            rgba(56, 31, 14, 0.18) 8px 12px,
+            rgba(0, 0, 0, 0) 12px 19px,
+            rgba(144, 99, 60, 0.08) 19px 24px
+          ),
+          repeating-linear-gradient(
+            97deg,
+            rgba(163, 114, 72, 0.08) 0 2px,
+            rgba(0, 0, 0, 0) 2px 7px,
+            rgba(72, 42, 21, 0.12) 7px 9px,
+            rgba(0, 0, 0, 0) 9px 16px
+          ),
+          linear-gradient(
+            104deg,
+            rgba(74, 45, 23, 0.3) 0%,
+            rgba(126, 82, 47, 0.12) 7%,
+            rgba(67, 40, 20, 0.24) 16%,
+            rgba(143, 96, 56, 0.07) 25%,
+            rgba(58, 33, 17, 0.28) 37%,
+            rgba(121, 78, 45, 0.11) 46%,
+            rgba(64, 36, 18, 0.24) 58%,
+            rgba(146, 100, 60, 0.08) 68%,
+            rgba(61, 35, 18, 0.24) 80%,
+            rgba(124, 83, 49, 0.12) 90%,
+            rgba(71, 43, 23, 0.3) 100%
+          ),
+          linear-gradient(
+            95deg,
+            rgba(171, 120, 76, 0.09) 0%,
+            rgba(0, 0, 0, 0) 13%,
+            rgba(150, 99, 60, 0.08) 29%,
+            rgba(0, 0, 0, 0) 44%,
+            rgba(92, 55, 31, 0.11) 62%,
+            rgba(0, 0, 0, 0) 78%,
+            rgba(154, 108, 67, 0.08) 100%
+          ),
+          linear-gradient(145deg, #77502f 0%, #5b3922 42%, #372114 100%);
+        box-shadow:
+          0 24px 40px rgba(57, 38, 19, 0.16),
+          0 12px 16px rgba(57, 38, 19, 0.08),
+          inset 1px 1px 0 rgba(255, 255, 255, 0.14),
+          inset -1px -1px 0 rgba(0, 0, 0, 0.24);
+      }
+
+      .bezel {
+        position: relative;
+        padding: 0.5rem;
+        border-radius: 24px;
+        background: linear-gradient(145deg, #181512, #090807);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.08),
+          inset 0 -1px 0 rgba(255, 255, 255, 0.03),
+          0 14px 26px rgba(0, 0, 0, 0.22);
+      }
+
+      .crt {
+        position: relative;
+        overflow: hidden;
+        border-radius: 18px;
+        background: #000;
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+          inset 0 0 46px rgba(0, 0, 0, 0.72);
+      }
+
+      video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        background: #000;
+        filter: saturate(0.94) contrast(1.04);
+      }
+
+      video.local-preview {
+        transform: scaleX(-1);
+      }
+
+      .overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(115deg, rgba(255, 255, 255, 0.2), transparent 24%, transparent 76%, rgba(255, 255, 255, 0.08)),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.12));
+        box-shadow:
+          inset 0 0 90px rgba(0, 0, 0, 0.34),
+          inset 0 0 14px rgba(255, 255, 255, 0.08);
+      }
+
+      .resume-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.9rem;
+        border: 0;
+        padding: 0;
+        background: radial-gradient(circle, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0.12) 42%, rgba(0, 0, 0, 0));
+        cursor: pointer;
+        transition: background-color 120ms ease, transform 120ms ease;
+      }
+
+      .resume-overlay[hidden] {
+        display: none;
+      }
+
+      .resume-overlay:hover,
+      .resume-overlay:focus-visible {
+        background: radial-gradient(circle, rgba(0, 0, 0, 0.38), rgba(0, 0, 0, 0.15) 44%, rgba(0, 0, 0, 0));
+      }
+
+      .resume-overlay:active {
+        transform: scale(0.99);
+      }
+
+      .resume-icon {
+        position: relative;
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        background: linear-gradient(180deg, rgba(24, 24, 24, 0.82), rgba(12, 12, 12, 0.9));
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 0 0 8px rgba(8, 11, 16, 0.46),
+           0 10px 24px rgba(0, 0, 0, 0.28),
+           0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .resume-icon::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-40%, -50%);
+        width: 0;
+        height: 0;
+        border-top: 14px solid transparent;
+        border-bottom: 14px solid transparent;
+        border-left: 22px solid rgba(245, 245, 245, 0.94);
+      }
+
+      .resume-copy {
+        display: none;
+        width: min(82%, 24rem);
+        min-height: calc(2.9rem + 2.2rem + 0.45rem);
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        padding: 0.72rem 0.78rem;
+        border-radius: 18px;
+        border: 1px solid rgba(248, 234, 205, 0.18);
+        background: linear-gradient(180deg, rgba(11, 15, 22, 0.9), rgba(8, 11, 17, 0.8));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.12),
+          0 0 0 8px rgba(8, 11, 16, 0.38),
+          0 18px 38px rgba(0, 0, 0, 0.36);
+        grid-template-rows: auto auto;
+        align-items: start;
+        justify-items: stretch;
+        row-gap: 0.45rem;
+      }
+
+      .resume-copy::before,
+      .resume-copy::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .resume-label {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        z-index: 1;
+        width: 100%;
+        padding: 0.42rem 0.95rem;
+        border-radius: 999px;
+        background: linear-gradient(180deg, rgba(21, 27, 38, 0.92), rgba(10, 14, 22, 0.82));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.12),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+          0 10px 22px rgba(0, 0, 0, 0.28);
+        color: rgba(232, 240, 255, 0.95);
+        font-size: 0.96rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      .resume-detail {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        z-index: 1;
+        min-height: 1.2em;
+        width: 100%;
+        padding: 0.26rem 0.8rem;
+        border-radius: 999px;
+        background: linear-gradient(180deg, rgba(21, 27, 38, 0.78), rgba(10, 14, 22, 0.68));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.1),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.24),
+          0 10px 22px rgba(0, 0, 0, 0.24);
+        color: rgba(255, 243, 219, 0.98);
+        font-size: 0.8rem;
+        font-weight: 600;
+        letter-spacing: 0.015em;
+        text-align: center;
+        white-space: nowrap;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.34);
+        visibility: hidden;
+      }
+
+      .resume-overlay[data-mode="reconnect"] .resume-icon {
+        display: none;
+      }
+
+      .resume-overlay[data-mode="reconnect"] .resume-copy {
+        display: grid;
+      }
+
+      .resume-overlay[data-mode="reconnect"] .resume-detail:not(:empty) {
+        visibility: visible;
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-copy {
+        border-radius: 10px;
+        border-color: rgba(196, 255, 205, 0.26);
+        background: linear-gradient(180deg, rgba(5, 13, 8, 0.94), rgba(4, 9, 6, 0.86));
+        box-shadow:
+          inset 0 0 0 1px rgba(196, 255, 205, 0.08),
+          0 0 0 6px rgba(3, 10, 6, 0.38),
+          0 18px 40px rgba(0, 0, 0, 0.34);
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-copy::before {
+        inset: 6px;
+        border: 1px solid rgba(199, 255, 213, 0.36);
+        border-radius: 6px;
+        background:
+          repeating-linear-gradient(
+            180deg,
+            rgba(196, 255, 205, 0.06) 0 1px,
+            rgba(0, 0, 0, 0) 1px 3px
+          );
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-copy::after {
+        inset: 0;
+        background:
+          radial-gradient(circle at 24% 30%, rgba(196, 255, 205, 0.12), transparent 28%),
+          radial-gradient(circle at 80% 72%, rgba(196, 255, 205, 0.08), transparent 22%);
+        opacity: 0.8;
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-label,
+      .resume-overlay[data-overlay-variant="1"] .resume-detail {
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        text-shadow: 0 0 12px rgba(112, 255, 148, 0.18);
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-label {
+        color: rgba(217, 255, 224, 0.97);
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-detail {
+        color: rgba(174, 236, 185, 0.94);
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-icon {
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(5, 12, 8, 0.94), rgba(3, 8, 5, 0.9));
+        border-color: rgba(196, 255, 205, 0.26);
+        box-shadow:
+          inset 0 0 0 1px rgba(196, 255, 205, 0.08),
+          0 0 0 6px rgba(3, 10, 6, 0.42),
+          0 14px 30px rgba(0, 0, 0, 0.32);
+      }
+
+      .resume-overlay[data-overlay-variant="1"] .resume-icon::before {
+        border-left-color: rgba(217, 255, 224, 0.97);
+      }
+
+      .controls {
+        display: grid;
+        width: 100%;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 0;
+        margin-top: calc(var(--cabinet-bezel-gap) - var(--controls-top-padding));
+        padding: var(--controls-top-padding) 0.35rem var(--controls-bottom-padding);
+        color: #e7d8c9;
+      }
+
+      .controls-meta {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        min-width: 0;
+      }
+
+      .controls-hardware {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 1rem;
+        min-width: 0;
+      }
+
+      .controls .eye-button {
+        grid-column: 1 / -1;
+        justify-self: center;
+        margin-top: 0.9rem;
+      }
+
+      .badge {
+        display: inline-flex;
+        position: relative;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        height: var(--control-strip-height);
+        padding: 0 0.6rem;
+        line-height: 1;
+        white-space: nowrap;
+        border-radius: 999px;
+        border: 0;
+        overflow: hidden;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.22));
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: inherit;
+        text-decoration: none;
+        text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+        user-select: none;
+        -webkit-user-select: none;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.08),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.24);
+        transition:
+          background-color 120ms ease,
+          transform 120ms ease,
+          box-shadow 120ms ease;
+      }
+
+      .badge::before {
+        content: "";
+        position: absolute;
+        inset: 4px 6px;
+        border-radius: inherit;
+        pointer-events: none;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.18) 0 18%, transparent 20%) center center / var(--perforation-size) var(--perforation-size) repeat;
+      }
+
+      .badge:hover,
+      .badge:focus-visible {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.2));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.12),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+          0 0 0 2px rgba(255, 255, 255, 0.08);
+      }
+
+      .badge:hover::before,
+      .badge:focus-visible::before {
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.22) 0 18%, transparent 20%) center center / var(--perforation-size) var(--perforation-size) repeat;
+      }
+
+      .badge-label {
+        display: block;
+        position: relative;
+        z-index: 1;
+        transform: translateY(-0.06em);
+      }
+
+      .badge:active {
+        transform: translateY(1px);
+      }
+
+      .frame-indicator {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        justify-self: center;
+        contain: paint;
+        background:
+          radial-gradient(circle at 34% 34%, rgba(255, 255, 255, 0.56) 0 18%, transparent 20%),
+          radial-gradient(circle at 50% 52%, #fff1d8 0 18%, #f5bc58 34%, #cc7b16 58%, #4f2a07 78%, #170b02 100%);
+        box-shadow:
+          inset 0 1px 1px rgba(255, 255, 255, 0.34),
+          inset 0 -1px 1px rgba(0, 0, 0, 0.28),
+          0 0 10px rgba(245, 173, 62, 0.26),
+          0 0 18px rgba(245, 173, 62, 0.12);
+        transition:
+          background 140ms ease,
+          box-shadow 140ms ease;
+      }
+
+      .frame-indicator.is-green {
+        background:
+          radial-gradient(circle at 34% 34%, rgba(255, 255, 255, 0.58) 0 18%, transparent 20%),
+          radial-gradient(circle at 50% 52%, #f3fff5 0 18%, #6ff89a 34%, #1ab14e 58%, #0e3d1c 78%, #061008 100%);
+        box-shadow:
+          inset 0 1px 1px rgba(255, 255, 255, 0.42),
+          inset 0 -1px 1px rgba(0, 0, 0, 0.28),
+           0 0 10px rgba(48, 222, 102, 0.34),
+           0 0 18px rgba(48, 222, 102, 0.16);
+      }
+
+      .frame-indicator.is-red {
+        background:
+          radial-gradient(circle at 34% 34%, rgba(255, 255, 255, 0.56) 0 18%, transparent 20%),
+          radial-gradient(circle at 50% 52%, #ffe9e5 0 18%, #ff8f80 34%, #ce3025 58%, #4d100c 78%, #120403 100%);
+        box-shadow:
+          inset 0 1px 1px rgba(255, 255, 255, 0.42),
+          inset 0 -1px 1px rgba(0, 0, 0, 0.28),
+           0 0 10px rgba(240, 77, 61, 0.28),
+           0 0 18px rgba(240, 77, 61, 0.14);
+      }
+
+      .grille {
+        position: relative;
+        height: var(--control-strip-height);
+        border-radius: 999px;
+        overflow: hidden;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.22));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.08),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.24);
+      }
+
+      .grille::before {
+        content: "";
+        position: absolute;
+        inset: 4px 6px;
+        border-radius: inherit;
+        pointer-events: none;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.18) 0 18%, transparent 20%) center center / var(--perforation-size) var(--perforation-size) repeat;
+      }
+
+      @media (min-width: 761px) {
+        .controls {
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 1rem;
+        }
+
+        .controls-meta {
+          min-width: 0;
+        }
+
+        .badge {
+          width: 100%;
+          min-width: 84px;
+          flex: 1 1 auto;
+          justify-content: flex-start;
+          padding: 0 0.75rem;
+          border-radius: 999px;
+        }
+
+        .badge-label {
+          margin-left: 0.15rem;
+        }
+
+        .controls-hardware {
+          display: flex;
+          align-items: center;
+        }
+
+        .grille {
+          display: none;
+        }
+      }
+
+      .channel-switcher {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .channel-button {
+        --channel-face-top: #e7dfcf;
+        --channel-face-mid: #c7c0b1;
+        --channel-face-bottom: #8f8779;
+        --channel-text: #1b1814;
+        --channel-text-shadow: rgba(255, 248, 235, 0.34);
+        --channel-glow-inner: rgba(0, 0, 0, 0);
+        --channel-glow-outer: rgba(0, 0, 0, 0);
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 3px solid transparent;
+        border-radius: 7px;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        display: grid;
+        place-items: center;
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1;
+        color: var(--channel-text);
+        text-shadow: 0 1px 0 var(--channel-text-shadow);
+        background:
+          radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.52) 0 10%, transparent 24%) padding-box,
+          linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.08) 18%, rgba(0, 0, 0, 0.16) 100%) padding-box,
+          linear-gradient(180deg, var(--channel-face-top) 0%, var(--channel-face-mid) 54%, var(--channel-face-bottom) 100%) padding-box,
+          linear-gradient(180deg, #595750 0%, #24221e 42%, #080808 100%) border-box;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.18),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.52),
+          0 1px 2px rgba(0, 0, 0, 0.36),
+          0 0 0 1px rgba(0, 0, 0, 0.58),
+          0 0 9px var(--channel-glow-inner),
+          0 0 18px var(--channel-glow-outer);
+        transition:
+          transform 120ms ease,
+          box-shadow 140ms ease,
+          background 140ms ease,
+          color 140ms ease;
+      }
+
+      .channel-button:hover,
+      .channel-button:focus-visible {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.22),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.56),
+          0 1px 2px rgba(0, 0, 0, 0.38),
+          0 0 0 1px rgba(0, 0, 0, 0.58),
+          0 0 9px var(--channel-glow-inner),
+          0 0 18px var(--channel-glow-outer),
+          0 0 0 2px rgba(255, 255, 255, 0.08);
+      }
+
+      .channel-button:active {
+        transform: translateY(1px);
+      }
+
+      .channel-button.is-active {
+        --channel-face-top: #f0ffd3;
+        --channel-face-mid: #b8f78d;
+        --channel-face-bottom: #49cf4b;
+        --channel-text: #173213;
+        --channel-text-shadow: rgba(245, 255, 236, 0.72);
+        --channel-glow-inner: rgba(115, 255, 118, 0.42);
+        --channel-glow-outer: rgba(115, 255, 118, 0.24);
+      }
+
+      .channel-button.is-available {
+        --channel-face-top: #dfe4d1;
+        --channel-face-mid: #b7c8a7;
+        --channel-face-bottom: #7e9071;
+        --channel-text: #273425;
+        --channel-text-shadow: rgba(241, 249, 234, 0.48);
+        --channel-glow-inner: rgba(121, 232, 123, 0.14);
+        --channel-glow-outer: rgba(121, 232, 123, 0.08);
+      }
+
+      .channel-button.is-empty {
+        --channel-face-top: #d4cdbc;
+        --channel-face-mid: #afa795;
+        --channel-face-bottom: #7c7468;
+        --channel-text: rgba(30, 27, 24, 0.5);
+        --channel-text-shadow: rgba(255, 250, 241, 0.22);
+      }
+
+      .channel-button.is-empty[disabled] {
+        cursor: default;
+        opacity: 1;
+      }
+
+      .channel-button.is-info {
+        --channel-face-top: #dce8f9;
+        --channel-face-mid: #a6c2ea;
+        --channel-face-bottom: #6f95cf;
+        --channel-text: #18304f;
+        --channel-text-shadow: rgba(244, 249, 255, 0.52);
+        --channel-glow-inner: rgba(102, 179, 255, 0.14);
+        --channel-glow-outer: rgba(102, 179, 255, 0.08);
+      }
+
+      .channel-button.is-info.is-active {
+        --channel-face-top: #eef7ff;
+        --channel-face-mid: #8fc6ff;
+        --channel-face-bottom: #3f82d7;
+        --channel-text: #102846;
+        --channel-text-shadow: rgba(245, 251, 255, 0.76);
+        --channel-glow-inner: rgba(103, 183, 255, 0.42);
+        --channel-glow-outer: rgba(103, 183, 255, 0.24);
+      }
+
+      .channel-button.is-active,
+      .channel-button.is-info.is-active {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.22),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.56),
+          0 1px 2px rgba(0, 0, 0, 0.38),
+          0 0 0 1px rgba(0, 0, 0, 0.58),
+          0 0 12px var(--channel-glow-inner),
+          0 0 24px var(--channel-glow-outer);
+      }
+
+      .eye-button {
+        position: relative;
+        width: 108px;
+        height: 56px;
+        border: 3px solid transparent;
+        padding: 0;
+        border-radius: 18px;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.08) 34%, rgba(0, 0, 0, 0.18)) padding-box,
+          linear-gradient(180deg, #f7ecd9 0%, #e8d8c0 52%, #cbb496 100%) padding-box,
+          linear-gradient(180deg, #595750 0%, #24221e 42%, #080808 100%) border-box;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.68),
+          inset 0 -2px 3px rgba(101, 73, 42, 0.24),
+          0 8px 14px rgba(0, 0, 0, 0.16),
+          0 0 0 1px rgba(0, 0, 0, 0.58);
+        transition:
+          transform 120ms ease,
+          box-shadow 140ms ease,
+          filter 140ms ease;
+        display: grid;
+        place-items: center;
+      }
+
+      .eye-button:hover,
+      .eye-button:focus-visible {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.78),
+          inset 0 -2px 3px rgba(101, 73, 42, 0.28),
+          0 8px 16px rgba(0, 0, 0, 0.18),
+          0 0 0 1px rgba(0, 0, 0, 0.58),
+          0 0 0 2px rgba(255, 255, 255, 0.08);
+      }
+
+      .eye-button:active {
+        transform: translateY(1px);
+      }
+
+      .eye-button.is-active {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.78),
+          inset 0 -2px 3px rgba(101, 73, 42, 0.28),
+          0 0 0 1px rgba(0, 0, 0, 0.58),
+          0 0 0 2px rgba(255, 95, 78, 0.32),
+          0 0 22px 2px rgba(255, 73, 62, 0.48),
+          0 0 46px 10px rgba(255, 73, 62, 0.2);
+        filter: saturate(1.05);
+      }
+
+      .eye-icon {
+        width: 90px;
+        height: 36px;
+        overflow: visible;
+        transform: translateZ(0);
+        backface-visibility: hidden;
+      }
+
+      .eye-outline,
+      .eye-iris,
+      .eye-pupil {
+        transition:
+          fill 140ms ease,
+          stroke 140ms ease,
+          filter 140ms ease;
+      }
+
+      .eye-outline {
+        fill: none;
+        stroke: #2b2119;
+        stroke-width: 2.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .eye-iris {
+        fill: none;
+        stroke: #2b2119;
+        stroke-width: 2.4;
+      }
+
+      .eye-pupil {
+        fill: #1e1510;
+      }
+
+      .eye-highlight {
+        fill: #f3e6d4;
+        transition: fill 140ms ease;
+      }
+
+      .eye-button.is-active .eye-outline,
+      .eye-button.is-active .eye-iris {
+        stroke: #7f1912;
+      }
+
+      .eye-button.is-active .eye-pupil {
+        fill: #b92017;
+        filter: drop-shadow(0 0 6px rgba(255, 76, 62, 0.34));
+      }
+
+      .eye-button.is-active .eye-highlight {
+        fill: #f5ddda;
+      }
+
+      .debug-panel {
+        position: static;
+        width: 100%;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        padding: 1rem;
+        margin-top: 1rem;
+        border-radius: 24px;
+        background: rgba(255, 251, 247, 0.92);
+        box-shadow:
+          0 18px 30px rgba(66, 53, 40, 0.08),
+          inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(127, 102, 76, 0.14);
+        backdrop-filter: blur(12px);
+        max-height: none;
+        overflow: visible;
+      }
+
+      @media (min-width: 1220px) {
+        .debug-panel {
+          position: absolute;
+          top: calc(100% + 1rem);
+          left: 0;
+          margin-top: 0;
+          max-height: none;
+          overflow: visible;
+        }
+      }
+
+      .debug-header {
+        display: grid;
+        gap: 0.25rem;
+        margin-bottom: 0.9rem;
+      }
+
+      .debug-title {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #6b5846;
+      }
+
+      .debug-subtitle {
+        margin: 0;
+        font-size: 0.92rem;
+        line-height: 1.45;
+        color: #6f6154;
+      }
+
+      .debug-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+
+      .debug-tab,
+      .copy-button,
+      .view-toggle-button {
+        appearance: none;
+        border: 0;
+        border-radius: 999px;
+        padding: 0.45rem 0.8rem;
+        background: #ece4da;
+        color: #513e2f;
+        cursor: pointer;
+        transition:
+          background-color 120ms ease,
+          color 120ms ease,
+          transform 120ms ease;
+      }
+
+      .debug-tab:hover,
+      .copy-button:hover,
+      .view-toggle-button:hover {
+        background: #e1d5c8;
+      }
+
+      .debug-tab.is-active,
+      .view-toggle-button.is-active {
+        background: #6a4a33;
+        color: #f7efe7;
+      }
+
+      .debug-tab:active,
+      .copy-button:active,
+      .view-toggle-button:active {
+        transform: translateY(1px);
+      }
+
+      .debug-body {
+        min-height: 640px;
+      }
+
+      .debug-panel[hidden],
+      .debug-view[hidden],
+      .sdp-mode-pane[hidden] {
+        display: none;
+      }
+
+      .debug-view {
+        display: grid;
+        gap: 0.9rem;
+        align-content: start;
+        min-height: 640px;
+      }
+
+      .metrics {
+        display: grid;
+        gap: 0.7rem;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      }
+
+      .metric {
+        padding: 0.8rem 0.85rem;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(131, 109, 84, 0.12);
+      }
+
+      .metric-label {
+        display: block;
+        margin-bottom: 0.3rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #8a7561;
+      }
+
+      .metric-value {
+        display: block;
+        color: #2c2219;
+        font-size: 0.95rem;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+
+      .metric-wide {
+        grid-column: 1 / -1;
+      }
+
+      .panel-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .panel-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+      }
+
+      .panel-title {
+        margin: 0;
+        font-size: 0.88rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #6d5a48;
+      }
+
+      .view-toggle {
+        display: inline-flex;
+        gap: 0.25rem;
+        padding: 0.2rem;
+        border-radius: 999px;
+        background: #efe7de;
+      }
+
+      .view-toggle-button {
+        padding-inline: 0.75rem;
+      }
+
+      .code-block {
+        margin: 0;
+        padding: 0.95rem 1rem;
+        overflow: auto;
+        border-radius: 16px;
+        background: #1c1714;
+        color: #f6eadf;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.76rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 520px;
+      }
+
+      .log-block {
+        max-height: 640px;
+      }
+
+      .sdp-readable {
+        display: grid;
+        gap: 0.9rem;
+        align-content: start;
+      }
+
+      .sdp-card {
+        padding: 0.95rem 1rem;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.86);
+        border: 1px solid rgba(131, 109, 84, 0.14);
+      }
+
+      .sdp-card-title {
+        margin: 0 0 0.8rem;
+        font-size: 0.9rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #5e4d3d;
+      }
+
+      .sdp-media-title {
+        margin-top: 0.35rem;
+      }
+
+      .sdp-grid {
+        display: grid;
+        grid-template-columns: minmax(100px, 140px) 1fr;
+        gap: 0.5rem 0.9rem;
+        margin: 0;
+      }
+
+      .sdp-grid dt {
+        color: #8a7561;
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .sdp-grid dd {
+        margin: 0;
+        color: #2b231c;
+        line-height: 1.5;
+        word-break: break-word;
+      }
+
+      .sdp-list {
+        margin: 0;
+        padding-left: 1.1rem;
+      }
+
+      .sdp-list li + li {
+        margin-top: 0.3rem;
+      }
+
+      .sdp-inline-code {
+        display: inline-block;
+        padding: 0.14rem 0.38rem;
+        border-radius: 999px;
+        background: #f1e7dc;
+        color: #4d3929;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem;
+      }
+
+      .status {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @media (max-width: 760px) {
+        :root {
+          --control-strip-height: 24px;
+          --perforation-size: 10px;
+          --perforation-offset-y: 5px;
+          --controls-top-padding: 0.5rem;
+          --controls-bottom-padding: 0.5rem;
+          --mobile-eye-width: 54px;
+          --mobile-eye-height: 30px;
+          --mobile-eye-gap: 0.4rem;
+          --mobile-meta-gap: 0.45rem;
+          --mobile-indicator-size: 12px;
+          --mobile-channel-gap: 0.18rem;
+          --mobile-channel-button-width: 26px;
+        }
+
+        body {
+          padding-top: 1rem;
+          padding-right: max(1rem, env(safe-area-inset-right));
+          padding-bottom: 1rem;
+          padding-left: max(1rem, env(safe-area-inset-left));
+        }
+
+        .scene {
+          min-height: calc(100vh - 2rem);
+          place-items: start center;
+        }
+
+        .tv {
+          margin-top: 1rem;
+        }
+
+        .controls {
+          position: relative;
+          grid-template-columns: 1fr 1fr;
+          gap: 0.5rem;
+          padding-right: 0;
+          padding-left: 0;
+          min-height: var(--mobile-eye-height);
+        }
+
+        .controls-meta,
+        .controls-hardware {
+          width: calc(50% - (var(--mobile-eye-width) / 2) - var(--mobile-eye-gap));
+          min-width: 0;
+        }
+
+        .controls-meta {
+          justify-self: start;
+          gap: var(--mobile-meta-gap);
+        }
+
+        .controls-hardware {
+          justify-self: end;
+          display: flex;
+          justify-content: flex-end;
+          gap: 0.45rem;
+        }
+
+        .controls .eye-button {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          grid-column: auto;
+          margin-top: 0;
+          justify-self: auto;
+          transform: translate(-50%, -50%);
+        }
+
+        .controls .eye-button:active {
+          transform: translate(-50%, calc(-50% + 1px));
+        }
+
+        .badge {
+          height: var(--mobile-eye-height);
+          width: calc((4 * var(--mobile-channel-button-width)) + (3 * var(--mobile-channel-gap)) - var(--mobile-indicator-size) - var(--mobile-meta-gap));
+          padding: 0 0.42rem;
+          font-size: 0.62rem;
+          letter-spacing: 0.08em;
+        }
+
+        .frame-indicator {
+          width: var(--mobile-indicator-size);
+          height: var(--mobile-indicator-size);
+        }
+
+        .grille {
+          display: none;
+        }
+
+        .channel-switcher {
+          gap: var(--mobile-channel-gap);
+        }
+
+        .channel-button {
+          width: var(--mobile-channel-button-width);
+          height: var(--mobile-eye-height);
+          border-radius: 6px;
+          font-size: 0.72rem;
+          flex: 0 0 auto;
+        }
+
+        .eye-button {
+          width: var(--mobile-eye-width);
+          height: var(--mobile-eye-height);
+          border-radius: 14px;
+        }
+
+        .eye-icon {
+          width: 44px;
+          height: 17px;
+        }
+
+        .debug-body,
+        .debug-view,
+        .code-block {
+          min-height: 440px;
+        }
+
+        .sdp-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (min-width: 761px) and (max-width: 1219px) and (orientation: landscape) and (hover: none) and (pointer: coarse) {
+        :root {
+          --control-strip-height: 24px;
+          --perforation-size: 10px;
+          --perforation-offset-y: 5px;
+          --controls-top-padding: 0.5rem;
+          --controls-bottom-padding: 0.5rem;
+          --mobile-eye-width: 54px;
+          --mobile-eye-height: 30px;
+          --mobile-eye-gap: 0.4rem;
+          --mobile-meta-gap: 0.45rem;
+          --mobile-indicator-size: 12px;
+          --mobile-channel-gap: 0.18rem;
+          --mobile-channel-button-width: 26px;
+        }
+
+        .controls {
+          position: relative;
+          grid-template-columns: 1fr 1fr;
+          gap: 0.5rem;
+          padding-right: 0;
+          padding-left: 0;
+          min-height: var(--mobile-eye-height);
+        }
+
+        .controls-meta,
+        .controls-hardware {
+          width: calc(50% - (var(--mobile-eye-width) / 2) - var(--mobile-eye-gap));
+          min-width: 0;
+        }
+
+        .controls-meta {
+          justify-self: start;
+          gap: var(--mobile-meta-gap);
+        }
+
+        .controls-hardware {
+          justify-self: end;
+          display: flex;
+          justify-content: flex-end;
+          gap: 0.45rem;
+        }
+
+        .controls .eye-button {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          grid-column: auto;
+          margin-top: 0;
+          justify-self: auto;
+          transform: translate(-50%, -50%);
+        }
+
+        .controls .eye-button:active {
+          transform: translate(-50%, calc(-50% + 1px));
+        }
+
+        .badge {
+          height: var(--mobile-eye-height);
+          width: calc((4 * var(--mobile-channel-button-width)) + (3 * var(--mobile-channel-gap)) - var(--mobile-indicator-size) - var(--mobile-meta-gap));
+          padding: 0 0.42rem;
+          font-size: 0.62rem;
+          letter-spacing: 0.08em;
+        }
+
+        .frame-indicator {
+          width: var(--mobile-indicator-size);
+          height: var(--mobile-indicator-size);
+        }
+
+        .grille {
+          display: none;
+        }
+
+        .channel-switcher {
+          gap: var(--mobile-channel-gap);
+        }
+
+        .channel-button {
+          width: var(--mobile-channel-button-width);
+          height: var(--mobile-eye-height);
+          border-radius: 6px;
+          font-size: 0.72rem;
+          flex: 0 0 auto;
+        }
+
+        .eye-button {
+          width: var(--mobile-eye-width);
+          height: var(--mobile-eye-height);
+          border-radius: 14px;
+        }
+
+        .eye-icon {
+          width: 44px;
+          height: 17px;
+        }
+      }
+
+      @media (max-width: 1219px) {
+        .scene {
+          place-items: start center;
+          min-height: auto;
+        }
+
+        .stage {
+          width: min(100%, var(--tv-width));
+        }
+
+        .tv {
+          margin-top: 1rem;
+        }
+
+      }
+    </style>
+  </head>
+  <body>
+    <main class="scene" id="scene">
+      <div class="stage" id="stage">
+        <section class="tv">
+          <div class="bezel">
+            <div class="crt">
+              <video id="remoteVideo" autoplay playsinline muted></video>
+              <div class="overlay"></div>
+              <button
+                type="button"
+                class="resume-overlay"
+                id="resumeOverlay"
+                data-overlay-variant="1"
+                aria-label="Resume video playback"
+                hidden
+              >
+                <span class="resume-icon" aria-hidden="true"></span>
+                <span class="resume-copy" aria-hidden="true">
+                  <span class="resume-label" id="resumeOverlayLabel"></span>
+                  <span class="resume-detail" id="resumeOverlayDetail"></span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="controls">
+            <div class="controls-meta">
+              <span class="frame-indicator" id="frameIndicator" aria-hidden="true"></span>
+              <a class="badge" href="https://github.com/pion" target="_blank" rel="noreferrer"><span class="badge-label">Pion X9</span></a>
+            </div>
+            <div class="controls-hardware">
+              <div class="grille"></div>
+              <div class="channel-switcher" aria-label="Channel switcher">
+                <button
+                  type="button"
+                  class="channel-button is-active"
+                  data-channel-slot="1"
+                  data-channel-label="1"
+                  data-channel-state="active"
+                  data-channel-enabled="true"
+                  aria-label="Channel 1 active"
+                >
+                  1
+                </button>
+                <button
+                  type="button"
+                  class="channel-button is-empty"
+                  data-channel-slot="2"
+                  data-channel-label="2"
+                  data-channel-state="available"
+                  data-channel-enabled="false"
+                  aria-label="Channel 2 unavailable"
+                  disabled
+                ></button>
+                <button
+                  type="button"
+                  class="channel-button is-empty"
+                  data-channel-slot="3"
+                  data-channel-label="3"
+                  data-channel-state="empty"
+                  data-channel-enabled="false"
+                  aria-label="Channel 3 unavailable"
+                  disabled
+                ></button>
+                <button type="button" class="channel-button is-info" id="debugToggle" aria-label="Show WebRTC debug panel" aria-expanded="false">i</button>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="eye-button"
+              id="cameraEyeButton"
+              aria-label="Activate camera broadcast mode"
+              aria-pressed="false"
+            >
+              <svg class="eye-icon" viewBox="0 0 60 24" aria-hidden="true">
+                <path
+                  class="eye-outline"
+                  d="M4 12c4.8-6.8 11.2-10.2 26-10.2S51.2 5.2 56 12c-4.8 6.8-11.2 10.2-26 10.2S8.8 18.8 4 12Z"
+                />
+                <circle class="eye-iris" cx="30" cy="12" r="9.3" />
+                <circle class="eye-pupil" cx="30" cy="12" r="6.1" />
+                <circle class="eye-highlight" cx="27.1" cy="8.8" r="1.75" />
+              </svg>
+            </button>
+          </div>
+        </section>
+
+        <aside class="debug-panel" id="debugPanel" hidden>
+          <div class="debug-header">
+            <p class="debug-title">WebRTC Debug</p>
+            <p class="debug-subtitle">Offer/answer SDP, state transitions, selected ICE route, and live media stats for viewer or camera mode.</p>
+          </div>
+
+          <div class="debug-tabs" role="tablist" aria-label="WebRTC debug tabs">
+            <button type="button" class="debug-tab is-active" data-panel-target="overview">Overview</button>
+            <button type="button" class="debug-tab" data-panel-target="offer">Browser offer</button>
+            <button type="button" class="debug-tab" data-panel-target="answer">Server answer</button>
+            <button type="button" class="debug-tab" data-panel-target="log">Event log</button>
+          </div>
+
+          <div class="debug-body">
+            <section class="debug-view" data-panel-view="overview">
+            <div class="metrics">
+              <div class="metric">
+                <span class="metric-label">Signaling</span>
+                <span class="metric-value" id="signalingState">new</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Peer connection</span>
+                <span class="metric-value" id="connectionState">new</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">ICE connection</span>
+                <span class="metric-value" id="iceConnectionState">new</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">ICE gathering</span>
+                <span class="metric-value" id="iceGatheringState">new</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Mode</span>
+                <span class="metric-value" id="modeState">Viewer</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Source</span>
+                <span class="metric-value" id="sourceState">Server feed</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Track</span>
+                <span class="metric-value" id="remoteTrackInfo">pending</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Video size</span>
+                <span class="metric-value" id="videoDimensions">pending</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Codec</span>
+                <span class="metric-value" id="codecInfo">pending</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Bytes</span>
+                <span class="metric-value" id="bytesReceived">0 B</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Bitrate</span>
+                <span class="metric-value" id="bitrate">pending</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Frames</span>
+                <span class="metric-value" id="framesDecoded">0</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Packets lost</span>
+                <span class="metric-value" id="packetsLost">0</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Jitter / RTT</span>
+                <span class="metric-value" id="timingInfo">pending</span>
+              </div>
+              <div class="metric metric-wide">
+                <span class="metric-label">Selected ICE pair</span>
+                <span class="metric-value" id="candidatePairInfo">pending</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="debug-view" data-panel-view="offer" hidden>
+            <div class="panel-heading">
+              <p class="panel-title">Browser SDP offer</p>
+              <div class="panel-actions">
+                <div class="view-toggle" aria-label="Offer SDP view mode">
+                  <button type="button" class="view-toggle-button is-active" data-sdp-target="offer" data-sdp-mode="readable">Readable</button>
+                  <button type="button" class="view-toggle-button" data-sdp-target="offer" data-sdp-mode="raw">Raw</button>
+                </div>
+                <button type="button" class="copy-button" data-copy-source="offerSdp">Copy raw</button>
+              </div>
+            </div>
+            <div class="sdp-mode-pane sdp-readable" id="offerReadable" data-sdp-pane="offer" data-sdp-pane-mode="readable">
+              <div class="sdp-card">
+                <p class="sdp-card-title">Pending offer...</p>
+              </div>
+            </div>
+            <pre class="code-block sdp-mode-pane" id="offerSdp" data-sdp-pane="offer" data-sdp-pane-mode="raw" hidden>Pending offer...</pre>
+          </section>
+
+          <section class="debug-view" data-panel-view="answer" hidden>
+            <div class="panel-heading">
+              <p class="panel-title">Server SDP answer</p>
+              <div class="panel-actions">
+                <div class="view-toggle" aria-label="Answer SDP view mode">
+                  <button type="button" class="view-toggle-button is-active" data-sdp-target="answer" data-sdp-mode="readable">Readable</button>
+                  <button type="button" class="view-toggle-button" data-sdp-target="answer" data-sdp-mode="raw">Raw</button>
+                </div>
+                <button type="button" class="copy-button" data-copy-source="answerSdp">Copy raw</button>
+              </div>
+            </div>
+            <div class="sdp-mode-pane sdp-readable" id="answerReadable" data-sdp-pane="answer" data-sdp-pane-mode="readable">
+              <div class="sdp-card">
+                <p class="sdp-card-title">Pending answer...</p>
+              </div>
+            </div>
+            <pre class="code-block sdp-mode-pane" id="answerSdp" data-sdp-pane="answer" data-sdp-pane-mode="raw" hidden>Pending answer...</pre>
+          </section>
+
+          <section class="debug-view" data-panel-view="log" hidden>
+            <div class="panel-heading">
+              <p class="panel-title">Event log</p>
+              <button type="button" class="copy-button" data-copy-source="eventLog">Copy</button>
+            </div>
+            <pre class="code-block log-block" id="eventLog">No events yet.</pre>
+            </section>
+          </div>
+        </aside>
+      </div>
+      <p class="status" id="status" aria-live="polite">Preparing WebRTC receiver...</p>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
