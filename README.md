@@ -1,5 +1,7 @@
 # WebRTC TV
 
+![WebRTC TV Screenshot](tv.jpeg)
+
 Run the server. Connect from a browser and start camera. Connect from another device and watch the camera feed.
 
 Half of this project's purpose is a fully-private security system. It has user-space Tailscale support, so it
