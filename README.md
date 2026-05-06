@@ -1,8 +1,11 @@
 # WebRTC TV
 
-![WebRTC TV Screenshot](tv.jpeg)
+WebRTC simple video relay (and maybe private no-cloud home security):
+- Run the server.
+- Connect from a browser and start camera.
+- Connect from another device and watch the camera feed.
 
-Run the server. Connect from a browser and start camera. Connect from another device and watch the camera feed.
+![WebRTC TV Screenshot](tv.jpeg)
 
 Half of this project's purpose is a fully-private security system. It has user-space Tailscale support, so it
 can run on your private VPN, with no public clouds and no public internet. Of course, there are way more mature
