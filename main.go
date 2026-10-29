@@ -98,6 +98,7 @@ type viewerPeer struct {
 	sourceCancel       context.CancelFunc
 	continuity         viewerRTPContinuity
 	broadcastSync      viewerBroadcastRewrite
+	pendingKeyframe    []*rtp.Packet // injected before next live packet; protected by mu
 	controlChannel     *webrtc.DataChannel
 	controlChannelOpen bool
 	negotiationMu      sync.Mutex
@@ -150,6 +151,7 @@ type broadcasterPeer struct {
 	hasSeenTimestamp   bool
 	framesReceived     uint64
 	lastFrameAt        time.Time
+	cachedKeyframe     []*rtp.Packet // last complete keyframe; protected by mu
 	relayOnce          sync.Once
 	negotiationMu      sync.Mutex
 	controlSendMu      sync.Mutex
@@ -314,7 +316,7 @@ func run(cfg appConfig, handler http.Handler) error {
 	}
 
 	addr := localListenAddr(cfg.port)
-	log.Printf("serving TV demo on http://localhost%s", addr)
+	log.Printf("serving TV demo on http://%s", addr)
 	return http.ListenAndServe(addr, handler)
 }
 
@@ -981,24 +983,29 @@ func (s *server) createCameraAnswer(offer webrtc.SessionDescription, sessionID s
 }
 
 func (s *server) relayBroadcast(broadcaster *broadcasterPeer, track *webrtc.TrackRemote) error {
-	// Ask for a fresh keyframe right away, then keep requesting them so late
-	// joiners and packet-loss recovery do not wait indefinitely for the next
-	// natural keyframe from the camera.
+	// Ask for a fresh keyframe right away to seed the keyframe cache so that
+	// viewers who join before a natural keyframe arrives get instant picture.
 	s.requestBroadcasterKeyFrame(broadcaster.slot)
 
-	keyframeTicker := time.NewTicker(3 * time.Second)
-	defer keyframeTicker.Stop()
+	// Long-interval PLI as an error-recovery safety net only. New viewers are
+	// served from the cached keyframe and do not trigger PLI requests.
+	recoveryTicker := time.NewTicker(60 * time.Second)
+	defer recoveryTicker.Stop()
 
 	go func() {
 		for {
 			select {
 			case <-broadcaster.relayCtx.Done():
 				return
-			case <-keyframeTicker.C:
+			case <-recoveryTicker.C:
 				s.requestBroadcasterKeyFrame(broadcaster.slot)
 			}
 		}
 	}()
+
+	isVP8 := normalizeVideoMimeType(broadcaster.codec()) == strings.ToLower(webrtc.MimeTypeVP8)
+	var kfAccum []*rtp.Packet
+	var accumulating bool
 
 	for {
 		// Relay RTP packets verbatim into the codec-matched shared track. The
@@ -1015,6 +1022,31 @@ func (s *server) relayBroadcast(broadcaster *broadcasterPeer, track *webrtc.Trac
 
 		if err := broadcaster.noteRTPTimeStamp(packet.Timestamp); err != nil {
 			log.Printf("failed to send camera ack: %v", err)
+		}
+
+		// Accumulate VP8 keyframe packets so new viewers can be served
+		// immediately without a PLI that would degrade camera quality.
+		if isVP8 {
+			vp8 := &codecs.VP8Packet{}
+			if _, err := vp8.Unmarshal(packet.Payload); err == nil {
+				if vp8.S == 1 {
+					isKeyFrame := len(vp8.Payload) > 0 && (vp8.Payload[0]&0x01) == 0
+					if isKeyFrame {
+						kfAccum = []*rtp.Packet{packet.Clone()}
+						accumulating = true
+					} else {
+						accumulating = false
+						kfAccum = nil
+					}
+				} else if accumulating {
+					kfAccum = append(kfAccum, packet.Clone())
+				}
+				if accumulating && packet.Marker {
+					broadcaster.setCachedKeyframe(kfAccum)
+					kfAccum = nil
+					accumulating = false
+				}
+			}
 		}
 
 		for _, viewer := range s.snapshotViewers() {
@@ -1141,9 +1173,18 @@ func (s *server) syncAllViewers() {
 
 func (s *server) syncViewerSource(viewer *viewerPeer) error {
 	slot := viewer.selectedChannel()
-	if broadcasterCodec := s.slotBroadcasterCodec(slot); broadcasterCodec != "" {
-		if err := viewer.useBroadcast(broadcasterCodec); err != nil {
+	broadcaster := s.slotBroadcaster(slot)
+	if broadcaster != nil {
+		if err := viewer.useBroadcast(broadcaster.codec()); err != nil {
 			return err
+		}
+		// Show the cached keyframe immediately as a visual placeholder, then
+		// also request a fresh keyframe via PLI so the live delta frames that
+		// follow are decodable (delta frames reference the live encoder's
+		// previous frame, not our cached one).  A single join-time PLI is
+		// negligible for quality; the periodic 3-second ticker is gone.
+		if kf := broadcaster.getCachedKeyframe(); len(kf) > 0 {
+			viewer.setPendingKeyframe(kf)
 		}
 		s.requestBroadcasterKeyFrame(slot)
 		return nil
@@ -1364,6 +1405,34 @@ func (v *viewerPeer) writeBroadcastPacket(slot int, packet *rtp.Packet) error {
 		return nil
 	}
 
+	// Inject the cached keyframe ahead of the first live packet so the viewer
+	// gets an immediate picture without a PLI round-trip.
+	// All keyframe packets are stamped at the current output timestamp so the
+	// decoder sees them as one contiguous frame immediately before the live
+	// stream; broadcastSync is then initialised from the first live packet so
+	// there is no timestamp discontinuity at the join point.
+	if len(v.pendingKeyframe) > 0 {
+		pending := v.pendingKeyframe
+		v.pendingKeyframe = nil
+		kfTS := v.continuity.nextTimestamp
+		for _, kfPacket := range pending {
+			cloned := kfPacket.Clone()
+			cloned.SequenceNumber = v.continuity.nextSequence
+			cloned.Timestamp = kfTS
+			if err := v.outputTrack.WriteRTP(cloned); err != nil {
+				return err
+			}
+			v.continuity.nextSequence++
+		}
+		gap := v.currentTimestampGapLocked(v.outputCodec)
+		v.continuity.nextTimestamp = kfTS + gap
+		v.continuity.lastTimestampGap = gap
+	}
+
+	return v.writeOneBroadcastPacketLocked(packet)
+}
+
+func (v *viewerPeer) writeOneBroadcastPacketLocked(packet *rtp.Packet) error {
 	cloned := packet.Clone()
 	if !v.broadcastSync.initialized {
 		v.broadcastSync = viewerBroadcastRewrite{
@@ -1548,6 +1617,24 @@ func (b *broadcasterPeer) sendCameraAckSnapshot() error {
 	b.controlSendMu.Lock()
 	defer b.controlSendMu.Unlock()
 	return dc.SendText(string(payload))
+}
+
+func (b *broadcasterPeer) setCachedKeyframe(packets []*rtp.Packet) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cachedKeyframe = packets
+}
+
+func (b *broadcasterPeer) getCachedKeyframe() []*rtp.Packet {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.cachedKeyframe
+}
+
+func (v *viewerPeer) setPendingKeyframe(packets []*rtp.Packet) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.pendingKeyframe = packets
 }
 
 func (b *broadcasterPeer) requestKeyFrame() error {
